@@ -22,13 +22,19 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.util.Log;
 
+import androidx.preference.PreferenceManager;
+
 import com.marktreble.f3ftimer.R;
 import com.marktreble.f3ftimer.constants.IComm;
 import com.marktreble.f3ftimer.constants.Pref;
 import com.marktreble.f3ftimer.racemanager.RaceActivity;
 
+import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.MulticastSocket;
+import java.net.UnknownHostException;
 
 public class UDPService extends Service implements DriverInterface, Thread.UncaughtExceptionHandler {
 
@@ -45,6 +51,7 @@ public class UDPService extends Service implements DriverInterface, Thread.Uncau
     private String mBaseBIP = "";
 
     private DatagramReceiver datagramReceiver = null;
+    private MulticastReceiver multicastReceiver = null;
 
     static final String ICN_CONN_A = "amber";
     static final String ICN_CONN_A_B = "on";
@@ -60,6 +67,8 @@ public class UDPService extends Service implements DriverInterface, Thread.Uncau
     private static final int MAX_UDP_DATAGRAM_LEN = 64;
     private static final int UDP_SERVER_PORT = 4445;
 
+    private static final String MULTICAST_IP = "224.0.0.3";
+    private static final int MULTICAST_PORT = 9003;
 
     /*
      * General life-cycle function overrides
@@ -95,6 +104,10 @@ public class UDPService extends Service implements DriverInterface, Thread.Uncau
 
         if (datagramReceiver != null) {
             datagramReceiver.kill();
+        }
+
+        if (multicastReceiver != null) {
+            multicastReceiver.kill();
         }
 
         mBaseAConnected = false;
@@ -198,6 +211,114 @@ public class UDPService extends Service implements DriverInterface, Thread.Uncau
         }
     }
 
+    private class MulticastReceiver extends Thread {
+        private boolean bKeepRunning = true;
+
+        public void run() {
+            byte[] lmessage = new byte[MAX_UDP_DATAGRAM_LEN];
+            DatagramPacket packet = new DatagramPacket(lmessage, lmessage.length);
+            int serNoA = 0, serNoB = 0;
+
+            try {
+                MulticastSocket socket = new MulticastSocket(MULTICAST_PORT);
+                InetAddress group = InetAddress.getByName(MULTICAST_IP);
+                socket.joinGroup(group);
+
+                Log.d(TAG, "Listen " + MULTICAST_IP + ":" + MULTICAST_PORT);
+
+                while(bKeepRunning) {
+
+                    socket.receive(packet);
+                    String s = new String(packet.getData(), packet.getOffset(), packet.getLength());
+                    //Log.d(TAG, "Multicast receive : " + s);
+                    if (s.charAt(0) == '<' && s.charAt(s.length() - 1) == '>') {
+                        char base = s.charAt(1);
+                        int serNo = Integer.parseInt(s.substring(2, s.length() - 1));
+                        if ((base == 'A' && serNo != serNoA)) {
+                            buzz(packet.getAddress().getHostAddress());
+                            serNoA = serNo;
+                        } else if((base == 'B' && serNo != serNoB)) {
+                            buzz(packet.getAddress().getHostAddress());
+                            serNoB = serNo;
+                        }
+                    } else if (s.startsWith("BASE_A:") || s.startsWith("BASE_B:")) {
+                        String baseHost[] = s.split(":");
+                        if (baseHost.length >= 5) {
+                            //System.out.println(baseHost[0]);
+                            try {
+                                InetAddress.getByName(baseHost[1]); // Test if valid ip address
+                            } catch (UnknownHostException e) {
+                                Log.i("multicastThread", "Unknown host : " + baseHost[1]);
+                                e.printStackTrace();
+                                continue;
+                            }
+                            if(s.startsWith("BASE_A:")) {
+                                if (mBaseAIP.equals(baseHost[1]))
+                                    mBaseAConnected = true;
+                                if (!mBaseAConnected)
+                                    connectBaseA(baseHost[1]);
+                            } else if(s.startsWith("BASE_B:")) {
+                                if (mBaseBIP.equals(baseHost[1]))
+                                    mBaseBConnected = true;
+                                if (!mBaseBConnected)
+                                    connectBaseB(baseHost[1]);
+                            }
+                        }
+                    } else if(s.startsWith("WIND:")) {
+                        String baseHost[] = s.split(":");
+                        if(baseHost.length >= 3) {
+                            float wind_speed = (Float.parseFloat(baseHost[1]));
+                            float wind_angle_absolute = (Float.parseFloat(baseHost[2])) % 360;
+                            float wind_angle_relative = wind_angle_absolute - mSlopeOrientation;
+                            if (wind_angle_absolute > 180 + mSlopeOrientation) {
+                                wind_angle_relative -= 360;
+                            }
+                            if (wind_speed < 3 || wind_speed > 25) {
+                                mWindSpeedCounter++;
+                            } else {
+                                mWindSpeedCounter = 0;
+                                mWindSpeedCounterSeconds = 0;
+                                mWindTimestamp = System.currentTimeMillis();
+                            }
+                            if (mWindSpeedCounter == 2) {
+                                mWindSpeedCounterSeconds++;
+                                mWindSpeedCounter = 0;
+                            }
+                            boolean windLegal;
+                            if ((wind_angle_relative > 45 || wind_angle_relative < -45) || mWindSpeedCounterSeconds >= 20
+                                    || (System.currentTimeMillis() - mWindTimestamp >= 20000)) {
+                                mWindSpeedCounterSeconds = 20;
+                                //Log.d("TcpIoService", String.format("Wind illegal (wind angle_absolute=%f, wind angle_relative=%f wind speed=%f wind_speed_counter=%d)", wind_angle_absolute, wind_angle_relative, wind_speed, mWindSpeedCounter));
+                                mDriver.windIllegal();
+                                windLegal = false;
+                            } else {
+                                //Log.d("TcpIoService", String.format("Wind legal (wind angle_absolute=%f, wind angle_relative=%f wind speed=%f wind_speed_counter=%d)", wind_angle_absolute, wind_angle_relative, wind_speed, mWindSpeedCounter));
+                                mDriver.windLegal();
+                                windLegal = true;
+                            }
+                            Intent i = new Intent(IComm.RCV_UPDATE);
+                            String wind_data = formatWindValues(windLegal, wind_angle_absolute, wind_angle_relative, wind_speed, 20 - mWindSpeedCounterSeconds);
+                            i.putExtra("com.marktreble.f3ftimer.value.wind_values", wind_data);
+                            sendBroadcast(i);
+                        }
+                    }
+                }
+                try {
+                    socket.leaveGroup(group);
+                } catch(IOException e) {
+                    e.printStackTrace();
+                }
+                socket.close();
+            } catch (Throwable e) {
+                e.printStackTrace();
+            }
+        }
+
+        public void kill() {
+            bKeepRunning = false;
+        }
+    }
+
     // Binding for UI->Service Communication
     private final BroadcastReceiver onBroadcast = new BroadcastReceiver() {
         @Override
@@ -244,6 +365,9 @@ public class UDPService extends Service implements DriverInterface, Thread.Uncau
         datagramReceiver = new DatagramReceiver();
         datagramReceiver.start();
 
+        multicastReceiver = new MulticastReceiver();
+        multicastReceiver.start();
+
         // Output dummy wind readings
         if (intent != null) {
             Bundle extras = intent.getExtras();
@@ -253,7 +377,7 @@ public class UDPService extends Service implements DriverInterface, Thread.Uncau
                 mSlopeOrientation = Float.parseFloat(extras.getString("pref_wind_angle_offset", "0.0"));
             }
         }
-
+/*
         mWindEmulator = new Handler();
         Runnable runnable = new Runnable() {
 
@@ -297,7 +421,7 @@ public class UDPService extends Service implements DriverInterface, Thread.Uncau
             }
         };
         mWindEmulator.post(runnable);
-
+*/
         return (START_STICKY);
     }
 
