@@ -79,6 +79,7 @@ import com.marktreble.f3ftimer.driver.BluetoothHC05Service;
 import com.marktreble.f3ftimer.driver.SoftBuzzerService;
 import com.marktreble.f3ftimer.driver.TcpIoService;
 import com.marktreble.f3ftimer.driver.UDPService;
+import com.marktreble.f3ftimer.driver.MulticastService;
 import com.marktreble.f3ftimer.driver.USBIOIOService;
 import com.marktreble.f3ftimer.driver.USBOpenAccessoryService;
 import com.marktreble.f3ftimer.driver.USBOtherService;
@@ -374,6 +375,7 @@ public class RaceActivity extends BaseActivity
         BluetoothHC05Service.startDriver(this, mInputSource, mRid, e);
         TcpIoService.startDriver(this, mInputSource, mRid, e);
         UDPService.startDriver(this, mInputSource, mRid, e);
+        MulticastService.startDriver(this, getString(R.string.MULTICAST), mRid, e);
     }
 
     public void stopServers() {
@@ -394,6 +396,7 @@ public class RaceActivity extends BaseActivity
         BluetoothHC05Service.stop(this);
         TcpIoService.stop(this);
         UDPService.stop(this);
+        MulticastService.stop(this);
     }
 
     @Override
