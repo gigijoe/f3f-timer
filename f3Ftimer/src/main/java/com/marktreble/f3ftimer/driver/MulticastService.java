@@ -5,10 +5,13 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.util.Log;
+
+import androidx.preference.PreferenceManager;
 
 import com.marktreble.f3ftimer.R;
 import com.marktreble.f3ftimer.constants.IComm;
@@ -41,7 +44,6 @@ public class MulticastService extends Service implements DriverInterface, Thread
     static final String ICN_CONN_A_B = "on";
     static final String ICN_DISCONN = "off";
 
-    private Handler mWindEmulator;
     private static float mSlopeOrientation = 0.0f;
 
     int mWindSpeedCounterSeconds = 0;
@@ -52,6 +54,9 @@ public class MulticastService extends Service implements DriverInterface, Thread
 
     private static final String MULTICAST_IP = "224.0.0.3";
     private static final int MULTICAST_PORT = 9003;
+
+    private static boolean mMutlicastTrigger = false;
+    private static boolean mMutlicastWind = false;
 
     /*
      * General life-cycle function overrides
@@ -92,13 +97,16 @@ public class MulticastService extends Service implements DriverInterface, Thread
         mBaseAConnected = false;
         mBaseBConnected = false;
         driverDisconnected();
-
-        mWindEmulator.removeCallbacksAndMessages(null);
-
     }
 
     public static void startDriver(Context context, String inputSource, Integer race_id, Bundle params) {
-        if (inputSource.equals(context.getString(R.string.MULTICAST))) {
+        if (inputSource.equals(context.getString(R.string.MULTICAST)))
+            mMutlicastTrigger = true;
+
+        SharedPreferences sharedPref = PreferenceManager.getDefaultSharedPreferences(context);
+        mMutlicastWind = sharedPref.getBoolean("pref_wind_measurement", false);
+
+        if(mMutlicastWind || mMutlicastTrigger) {
             Intent i = new Intent(IComm.RCV_UPDATE);
             i.putExtra("icon", ICN_DISCONN);
             i.putExtra(IComm.MSG_SERVICE_CALLBACK, "driver_stopped");
@@ -137,11 +145,10 @@ public class MulticastService extends Service implements DriverInterface, Thread
                 Log.d(TAG, "Listen " + MULTICAST_IP + ":" + MULTICAST_PORT);
 
                 while(bKeepRunning) {
-
                     socket.receive(packet);
                     String s = new String(packet.getData(), packet.getOffset(), packet.getLength());
                     Log.d(TAG, "Multicast receive : " + s);
-                    if (s.charAt(0) == '<' && s.charAt(s.length() - 1) == '>') {
+                    if (mMutlicastTrigger && (s.charAt(0) == '<' && s.charAt(s.length() - 1) == '>')) {
                         char base = s.charAt(1);
                         int serNo = Integer.parseInt(s.substring(2, s.length() - 1));
                         if ((base == 'A' && serNo != serNoA)) {
@@ -151,7 +158,7 @@ public class MulticastService extends Service implements DriverInterface, Thread
                             buzz(packet.getAddress().getHostAddress());
                             serNoB = serNo;
                         }
-                    } else if (s.startsWith("BASE_A:") || s.startsWith("BASE_B:")) {
+                    } else if (mMutlicastTrigger && (s.startsWith("BASE_A:") || s.startsWith("BASE_B:"))) {
                         String baseHost[] = s.split(":");
                         if (baseHost.length >= 5) {
                             //System.out.println(baseHost[0]);
@@ -174,7 +181,7 @@ public class MulticastService extends Service implements DriverInterface, Thread
                                     connectBaseB(baseHost[1]);
                             }
                         }
-                    } else if(s.startsWith("WIND:")) {
+                    } else if(mMutlicastWind && s.startsWith("WIND:")) {
                         String baseHost[] = s.split(":");
                         if(baseHost.length >= 3) {
                             float wind_speed = (Float.parseFloat(baseHost[1]));

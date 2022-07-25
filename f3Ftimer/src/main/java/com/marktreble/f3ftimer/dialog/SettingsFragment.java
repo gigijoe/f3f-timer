@@ -335,6 +335,18 @@ public class SettingsFragment extends PreferenceFragmentCompat
             findPreference(Pref.RESET_BUTTON).setEnabled(false);
 
             findPreference(Pref.INPUT_SRC_DEVICE).setEnabled(false);
+        } else if (inputSource.equals(getString(R.string.MULTICAST))) {
+            // Demo mode - hide all options
+            findPreference(Pref.INPUT_TCPIO_IP).setEnabled(false);
+            findPreference(Pref.USB_BAUDRATE).setEnabled(false);
+            findPreference(Pref.USB_STOPBITS).setEnabled(false);
+            findPreference(Pref.USB_DATABITS).setEnabled(false);
+            findPreference(Pref.USB_PARITY).setEnabled(false);
+            findPreference(Pref.BASEA_IP).setEnabled(false);
+            findPreference(Pref.BASEB_IP).setEnabled(false);
+            findPreference(Pref.RESET_BUTTON).setEnabled(false);
+
+            findPreference(Pref.INPUT_SRC_DEVICE).setEnabled(false);
         } else {
             // USB - Hide device picker, show baud rate etc..
             if (inputSource.equals(getString(R.string.TCP_IO))) {

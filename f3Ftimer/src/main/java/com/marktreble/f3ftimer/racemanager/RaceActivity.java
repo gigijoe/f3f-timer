@@ -375,7 +375,7 @@ public class RaceActivity extends BaseActivity
         BluetoothHC05Service.startDriver(this, mInputSource, mRid, e);
         TcpIoService.startDriver(this, mInputSource, mRid, e);
         UDPService.startDriver(this, mInputSource, mRid, e);
-        MulticastService.startDriver(this, getString(R.string.MULTICAST), mRid, e);
+        MulticastService.startDriver(this, mInputSource, mRid, e);
     }
 
     public void stopServers() {
